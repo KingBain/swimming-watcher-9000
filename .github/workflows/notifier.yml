@@ -123,23 +123,22 @@ jobs:
             AVAILABILITY_STATUS="🔴 No matching classes found"
           fi
 
-          awk \
-            -v updated_at="$UPDATED_AT" \
-            -v http_status="$HTTP_STATUS" \
-            -v total_classes="${{ steps.parse_response.outputs.total_classes }}" \
-            -v full_classes="${{ steps.parse_response.outputs.full_classes }}" \
-            -v open_classes="${{ steps.parse_response.outputs.open_classes }}" \
-            -v availability_status="$AVAILABILITY_STATUS" '
+          AVAILABILITY_BLOCK=$(cat <<EOF_BLOCK
+          <!-- availability:start -->
+          _Last updated: $UPDATED_AT_
+
+          - HTTP Status: $HTTP_STATUS
+          - Total classes: ${{ steps.parse_response.outputs.total_classes }}
+          - Full classes: ${{ steps.parse_response.outputs.full_classes }}
+          - Classes with openings: ${{ steps.parse_response.outputs.open_classes }}
+          - Status: $AVAILABILITY_STATUS
+          <!-- availability:end -->
+          EOF_BLOCK
+          )
+
+          awk -v replacement="$AVAILABILITY_BLOCK" '
             /<!-- availability:start -->/ {
-              print "<!-- availability:start -->"
-              print "Last updated: " updated_at
-              print ""
-              print "- HTTP Status: " http_status
-              print "- Total classes: " total_classes
-              print "- Full classes: " full_classes
-              print "- Classes with openings: " open_classes
-              print "- Status: " availability_status
-              print "<!-- availability:end -->"
+              print replacement
               skip=1
               next
             }

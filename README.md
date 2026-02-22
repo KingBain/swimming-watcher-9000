@@ -1,4 +1,4 @@
-# swimming-watcher-winter-2025
+# Swimming Class Watcher 9000
 
 ![GitHub Actions Workflow Status](../../actions/workflows/notifier.yml/badge.svg)
 
@@ -6,14 +6,11 @@ Tracks hourly availability for **Swim Colours 5 – Purple (low ratio)** and sen
 
 ## Current Availability Snapshot
 <!-- availability:start -->
-Last updated: Never
+_Last updated: 
 
-- HTTP Status: Unknown
-- Total classes: Unknown
-- Full classes: Unknown
-- Classes with openings: Unknown
-- Status: Unknown
+- HTTP Status: 200
+- Total classes: 8
+- Full classes: 8
+- Classes with openings: 0
+- Status: 🟡 No open spots (all classes full)
 <!-- availability:end -->
-
-## Development workflow
-- Always sync from the latest `main` before making changes (`git checkout main && git pull`).
