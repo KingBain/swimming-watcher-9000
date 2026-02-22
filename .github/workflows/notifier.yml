@@ -73,42 +73,46 @@ jobs:
 
           # 2. Calculate statistics safely using jq (reading directly from the JSON file)
           TOTAL_ENTRIES=$(jq '[.body.activity_items[]?] | length' api_response.json)
-          AVAILABLE_SPOTS=$(jq '[.body.activity_items[]? | select((.total_open // 0) > 0)] | length' api_response.json)
+          
+          # Correct Logic: Class is open ONLY if total_open (capacity) > already_enrolled
+          AVAILABLE_CLASSES=$(jq '[.body.activity_items[]? | select((.total_open // 0) > (.already_enrolled // 0))] | length' api_response.json)
           
           # Fallbacks just in case jq returns empty strings
           TOTAL_ENTRIES=${TOTAL_ENTRIES:-0}
-          AVAILABLE_SPOTS=${AVAILABLE_SPOTS:-0}
+          AVAILABLE_CLASSES=${AVAILABLE_CLASSES:-0}
 
           # 3. Print the statistics table to the GitHub Actions Console
           echo "📊 API Response Statistics:"
           echo "-----------------------------------"
           echo "HTTP Response Code    : $HTTP_STATUS"
-          echo "Total Entries Returned: $TOTAL_ENTRIES"
-          echo "Entries with Openings : $AVAILABLE_SPOTS"
+          echo "Total Classes Found   : $TOTAL_ENTRIES"
+          echo "Classes with Openings : $AVAILABLE_CLASSES"
           echo "-----------------------------------"
           
-          if [ "$AVAILABLE_SPOTS" -eq 0 ]; then
-            echo "No open spots available. Ending action without sending a notification."
+          if [ "$AVAILABLE_CLASSES" -eq 0 ]; then
+            echo "All classes are full. Ending action without sending a notification."
           fi
           
           # Output to next step
-          echo "available_spots=$AVAILABLE_SPOTS" >> "$GITHUB_OUTPUT"
+          echo "available_classes=$AVAILABLE_CLASSES" >> "$GITHUB_OUTPUT"
 
       - name: Parse and send messages for available activities
-        if: steps.parse_response.outputs.available_spots > 0
+        if: steps.parse_response.outputs.available_classes > 0
         run: |
-          # Loop strictly through items where total_open > 0 (reading directly from the JSON file)
-          jq -c '.body.activity_items[]? | select((.total_open // 0) > 0)' api_response.json | while read -r i; do
+          # Loop strictly through items where total_open (capacity) > already_enrolled
+          jq -c '.body.activity_items[]? | select((.total_open // 0) > (.already_enrolled // 0))' api_response.json | while read -r i; do
             NAME=$(echo "$i" | jq -r '.name')
             DOW=$(echo "$i" | jq -r '.days_of_week')
             DATES=$(echo "$i" | jq -r '.date_range')
             TIME=$(echo "$i" | jq -r '.time_range')
-            OPEN_SPOTS=$(echo "$i" | jq -r '.total_open')
             DETAIL_URL=$(echo "$i" | jq -r '.detail_url')
+            
+            # Calculate exactly how many spots are left (Capacity - Enrolled)
+            SPOTS_LEFT=$(echo "$i" | jq -r '(.total_open // 0) - (.already_enrolled // 0)')
             
             # Message formatted for WhatsApp readability
             MESSAGE=$(printf "*Class:* %s\n*Days:* %s\n*Dates:* %s\n*Time:* %s\n*Spots Available:* %s\n*Link:* %s" \
-              "$NAME" "$DOW" "$DATES" "$TIME" "$OPEN_SPOTS" "$DETAIL_URL")
+              "$NAME" "$DOW" "$DATES" "$TIME" "$SPOTS_LEFT" "$DETAIL_URL")
 
             # Echo the message to the console for debugging
             echo -e "Sending message:\n$MESSAGE\n---"
