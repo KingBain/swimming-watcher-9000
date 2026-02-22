@@ -11,6 +11,9 @@ on:
         type: boolean
         default: false
 
+permissions:
+  contents: write
+
 jobs:
   ping_and_notify:
     runs-on: ubuntu-latest
@@ -22,12 +25,12 @@ jobs:
         id: send_request
         run: |
           API_URL="https://anc.ca.apm.activecommunities.com/ottawa/rest/activities/list?locale=en-US"
-          
+
           # Dynamically get today's date
           TODAY=$(date +"%Y-%m-%d")
-          
+
           # Use a heredoc to safely store the complex JSON payload
-          POST_DATA=$(cat <<EOF
+          POST_DATA=$(cat <<EOF_POST
           {
             "activity_search_pattern": {
               "skills": [],
@@ -58,12 +61,12 @@ jobs:
             },
             "activity_transfer_pattern": {}
           }
-          EOF
+          EOF_POST
           )
-          
+
           # Send request: Output body to api_response.json and capture only the HTTP status code
           HTTP_STATUS=$(curl -s -o api_response.json -w "%{http_code}" -X POST -H "Content-Type: application/json" -d "$POST_DATA" "$API_URL")
-          
+
           # Save ONLY the HTTP Status to environment variables
           echo "HTTP_STATUS=$HTTP_STATUS" >> "$GITHUB_ENV"
 
@@ -80,7 +83,7 @@ jobs:
           # 2. Calculate statistics strictly and safely
           TOTAL_CLASSES=$(jq -r '.body.activity_items // [] | length' api_response.json)
           OPEN_CLASSES=$(jq -r '[.body.activity_items // [] | .[] | select((.total_open // 0) > (.already_enrolled // 0))] | length' api_response.json)
-          
+
           TOTAL_CLASSES=${TOTAL_CLASSES:-0}
           OPEN_CLASSES=${OPEN_CLASSES:-0}
           FULL_CLASSES=$((TOTAL_CLASSES - OPEN_CLASSES))
@@ -93,7 +96,7 @@ jobs:
           echo "Classes Full          : $FULL_CLASSES"
           echo "Classes with Openings : $OPEN_CLASSES"
           echo "-----------------------------------"
-          
+
           if [ "$OPEN_CLASSES" -eq 0 ] && [ "$TOTAL_CLASSES" -gt 0 ]; then
             echo "All classes are currently full."
           elif [ "$TOTAL_CLASSES" -eq 0 ]; then
@@ -102,11 +105,62 @@ jobs:
             jq . api_response.json || cat api_response.json
             echo "--------------------------------------"
           fi
-          
+
           # Output variables for next steps
           echo "total_classes=$TOTAL_CLASSES" >> "$GITHUB_OUTPUT"
           echo "full_classes=$FULL_CLASSES" >> "$GITHUB_OUTPUT"
           echo "open_classes=$OPEN_CLASSES" >> "$GITHUB_OUTPUT"
+
+      - name: Update README with latest status
+        run: |
+          UPDATED_AT=$(date -u +"%Y-%m-%d %H:%M UTC")
+
+          if [ "${{ steps.parse_response.outputs.open_classes }}" -gt 0 ]; then
+            AVAILABILITY_STATUS="🟢 Open spots available"
+          elif [ "${{ steps.parse_response.outputs.total_classes }}" -gt 0 ]; then
+            AVAILABILITY_STATUS="🟡 No open spots (all classes full)"
+          else
+            AVAILABILITY_STATUS="🔴 No matching classes found"
+          fi
+
+          AVAILABILITY_BLOCK=$(cat <<EOF_BLOCK
+          <!-- availability:start -->
+          _Last updated: $UPDATED_AT_
+
+          - HTTP Status: $HTTP_STATUS
+          - Total classes: ${{ steps.parse_response.outputs.total_classes }}
+          - Full classes: ${{ steps.parse_response.outputs.full_classes }}
+          - Classes with openings: ${{ steps.parse_response.outputs.open_classes }}
+          - Status: $AVAILABILITY_STATUS
+          <!-- availability:end -->
+          EOF_BLOCK
+          )
+
+          awk -v replacement="$AVAILABILITY_BLOCK" '
+            /<!-- availability:start -->/ {
+              print replacement
+              skip=1
+              next
+            }
+            /<!-- availability:end -->/ {
+              skip=0
+              next
+            }
+            !skip { print }
+          ' README.md > README.tmp && mv README.tmp README.md
+
+      - name: Commit README updates
+        run: |
+          if git diff --quiet README.md; then
+            echo "No README changes to commit."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add README.md
+          git commit -m "chore: update swim availability snapshot"
+          git push
 
       - name: Send Dry Run Statistics (Manual Trigger)
         if: inputs.dry_run == true
@@ -134,10 +188,10 @@ jobs:
             DATES=$(echo "$i" | jq -r '.date_range')
             TIME=$(echo "$i" | jq -r '.time_range')
             DETAIL_URL=$(echo "$i" | jq -r '.detail_url')
-            
+
             # Calculate exactly how many spots are left
             SPOTS_LEFT=$(echo "$i" | jq -r '(.total_open // 0) - (.already_enrolled // 0)')
-            
+
             # Message formatted for WhatsApp readability
             MESSAGE=$(printf "🚨 *OPENING FOUND!*\n*Class:* %s\n*Days:* %s\n*Dates:* %s\n*Time:* %s\n*Spots Available:* %s\n*Link:* %s" \
               "$NAME" "$DOW" "$DATES" "$TIME" "$SPOTS_LEFT" "$DETAIL_URL")
