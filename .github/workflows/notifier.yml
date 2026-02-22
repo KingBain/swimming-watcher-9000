@@ -71,36 +71,43 @@ jobs:
             exit 1
           fi
 
-          # 2. Calculate statistics safely using jq (reading directly from the JSON file)
-          TOTAL_ENTRIES=$(jq '[.body.activity_items[]?] | length' api_response.json)
+          # 2. Calculate statistics strictly and safely
+          # Using "// []" ensures that if activity_items is missing, jq treats it as an empty array instead of throwing an error
+          TOTAL_CLASSES=$(jq -r '.body.activity_items // [] | length' api_response.json)
           
-          # Correct Logic: Class is open ONLY if total_open (capacity) > already_enrolled
-          AVAILABLE_CLASSES=$(jq '[.body.activity_items[]? | select((.total_open // 0) > (.already_enrolled // 0))] | length' api_response.json)
+          # Calculate how many have openings (capacity > enrolled)
+          OPEN_CLASSES=$(jq -r '[.body.activity_items // [] | .[] | select((.total_open // 0) > (.already_enrolled // 0))] | length' api_response.json)
           
-          # Fallbacks just in case jq returns empty strings
-          TOTAL_ENTRIES=${TOTAL_ENTRIES:-0}
-          AVAILABLE_CLASSES=${AVAILABLE_CLASSES:-0}
+          # Fallbacks to 0 in bash just in case
+          TOTAL_CLASSES=${TOTAL_CLASSES:-0}
+          OPEN_CLASSES=${OPEN_CLASSES:-0}
+          
+          # Calculate Full Classes directly via bash math
+          FULL_CLASSES=$((TOTAL_CLASSES - OPEN_CLASSES))
 
           # 3. Print the statistics table to the GitHub Actions Console
           echo "📊 API Response Statistics:"
           echo "-----------------------------------"
           echo "HTTP Response Code    : $HTTP_STATUS"
-          echo "Total Classes Found   : $TOTAL_ENTRIES"
-          echo "Classes with Openings : $AVAILABLE_CLASSES"
+          echo "Total Classes Found   : $TOTAL_CLASSES"
+          echo "Classes Full          : $FULL_CLASSES"
+          echo "Classes with Openings : $OPEN_CLASSES"
           echo "-----------------------------------"
           
-          if [ "$AVAILABLE_CLASSES" -eq 0 ]; then
-            echo "All classes are full. Ending action without sending a notification."
+          if [ "$OPEN_CLASSES" -eq 0 ] && [ "$TOTAL_CLASSES" -gt 0 ]; then
+            echo "All classes are currently full. Ending action without sending a notification."
+          elif [ "$TOTAL_CLASSES" -eq 0 ]; then
+            echo "No classes matched the search criteria. Ending action."
           fi
           
           # Output to next step
-          echo "available_classes=$AVAILABLE_CLASSES" >> "$GITHUB_OUTPUT"
+          echo "open_classes=$OPEN_CLASSES" >> "$GITHUB_OUTPUT"
 
       - name: Parse and send messages for available activities
-        if: steps.parse_response.outputs.available_classes > 0
+        if: steps.parse_response.outputs.open_classes > 0
         run: |
           # Loop strictly through items where total_open (capacity) > already_enrolled
-          jq -c '.body.activity_items[]? | select((.total_open // 0) > (.already_enrolled // 0))' api_response.json | while read -r i; do
+          jq -c '.body.activity_items // [] | .[] | select((.total_open // 0) > (.already_enrolled // 0))' api_response.json | while read -r i; do
             NAME=$(echo "$i" | jq -r '.name')
             DOW=$(echo "$i" | jq -r '.days_of_week')
             DATES=$(echo "$i" | jq -r '.date_range')
