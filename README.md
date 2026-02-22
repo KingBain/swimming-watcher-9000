@@ -1,4 +1,4 @@
-# swimming-watcher-winter-2025
+# Swimming Class Watcher 9000
 
 ![GitHub Actions Workflow Status](../../actions/workflows/notifier.yml/badge.svg)
 
