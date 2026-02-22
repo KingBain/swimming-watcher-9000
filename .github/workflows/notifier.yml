@@ -21,6 +21,7 @@ on:
 
 permissions:
   contents: write
+  issues: write
 
 jobs:
   ping_and_notify:
@@ -143,6 +144,58 @@ jobs:
           echo "total_classes=$TOTAL_CLASSES" >> "$GITHUB_OUTPUT"
           echo "full_classes=$FULL_CLASSES" >> "$GITHUB_OUTPUT"
           echo "open_classes=$OPEN_CLASSES" >> "$GITHUB_OUTPUT"
+
+      - name: Manage GitHub opening alerts
+        if: inputs.dry_run != true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          OPEN_CLASSES: ${{ steps.effective_stats.outputs.open_classes }}
+        run: |
+          set -euo pipefail
+
+          ALERT_TITLE="Swim opening available"
+          ALERT_LABEL="swim-opening-alert"
+
+          if [ "$OPEN_CLASSES" -gt 0 ]; then
+            ISSUE_BODY=$(cat <<EOF_ISSUE
+          Openings are currently available for **Swim Colours 5 – Purple (low ratio)**.
+
+          - Classes with openings: ${{ steps.effective_stats.outputs.open_classes }}
+          - Total classes found: ${{ steps.effective_stats.outputs.total_classes }}
+          - Full classes: ${{ steps.effective_stats.outputs.full_classes }}
+          - Workflow run: https://github.com/${REPO}/actions/runs/${{ github.run_id }}
+          EOF_ISSUE
+          )
+
+            OPEN_ALERT_ISSUES=$(gh issue list --repo "$REPO" --label "$ALERT_LABEL" --state open --json number,title -q '.[] | select(.title == "'"$ALERT_TITLE"'") | .number')
+
+            if [ -z "$OPEN_ALERT_ISSUES" ]; then
+              gh issue create \
+                --repo "$REPO" \
+                --title "$ALERT_TITLE" \
+                --body "$ISSUE_BODY" \
+                --assignee "KingBain" \
+                --label "$ALERT_LABEL"
+            else
+              while read -r issue_number; do
+                [ -z "$issue_number" ] && continue
+                gh issue comment "$issue_number" --repo "$REPO" --body "$ISSUE_BODY"
+                gh issue edit "$issue_number" --repo "$REPO" --add-assignee "KingBain"
+              done <<< "$OPEN_ALERT_ISSUES"
+            fi
+          else
+            OPEN_ALERT_ISSUES=$(gh issue list --repo "$REPO" --label "$ALERT_LABEL" --state open --json number -q '.[].number')
+
+            if [ -n "$OPEN_ALERT_ISSUES" ]; then
+              while read -r issue_number; do
+                [ -z "$issue_number" ] && continue
+                gh issue close "$issue_number" --repo "$REPO" --comment "No openings were found in the latest run. Closing this alert issue."
+              done <<< "$OPEN_ALERT_ISSUES"
+            else
+              echo "No open opening-alert issues to close."
+            fi
+          fi
 
       - name: Update README with latest status
         run: |
