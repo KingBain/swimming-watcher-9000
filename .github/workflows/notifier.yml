@@ -55,18 +55,11 @@ jobs:
           EOF
           )
           
-          # Send request: Output body to file and capture only the HTTP status code
+          # Send request: Output body to api_response.json and capture only the HTTP status code
           HTTP_STATUS=$(curl -s -o api_response.json -w "%{http_code}" -X POST -H "Content-Type: application/json" -d "$POST_DATA" "$API_URL")
           
-          # Save the HTTP Status to environment variables
+          # Save ONLY the HTTP Status to environment variables
           echo "HTTP_STATUS=$HTTP_STATUS" >> "$GITHUB_ENV"
-
-          # Safely write the JSON file contents to environment variable
-          {
-            echo 'RESPONSE<<EOF'
-            cat api_response.json
-            echo 'EOF'
-          } >> "$GITHUB_ENV"
 
       - name: Parse response and output stats
         id: parse_response
@@ -74,16 +67,13 @@ jobs:
           # 1. Check if the API call was successful
           if [ "$HTTP_STATUS" -ne 200 ]; then
             echo "❌ Error: API returned HTTP $HTTP_STATUS"
-            echo "Response Body: $RESPONSE"
+            cat api_response.json
             exit 1
           fi
 
-          # 2. Calculate statistics safely using jq
-          # Count total items returned in the array
-          TOTAL_ENTRIES=$(echo "$RESPONSE" | jq '[.body.activity_items[]?] | length')
-          
-          # Count how many of those items have total_open > 0
-          AVAILABLE_SPOTS=$(echo "$RESPONSE" | jq '[.body.activity_items[]? | select((.total_open // 0) > 0)] | length')
+          # 2. Calculate statistics safely using jq (reading directly from the JSON file)
+          TOTAL_ENTRIES=$(jq '[.body.activity_items[]?] | length' api_response.json)
+          AVAILABLE_SPOTS=$(jq '[.body.activity_items[]? | select((.total_open // 0) > 0)] | length' api_response.json)
           
           # Fallbacks just in case jq returns empty strings
           TOTAL_ENTRIES=${TOTAL_ENTRIES:-0}
@@ -107,8 +97,8 @@ jobs:
       - name: Parse and send messages for available activities
         if: steps.parse_response.outputs.available_spots > 0
         run: |
-          # Loop strictly through items where total_open > 0
-          echo "$RESPONSE" | jq -c '.body.activity_items[]? | select((.total_open // 0) > 0)' | while read -r i; do
+          # Loop strictly through items where total_open > 0 (reading directly from the JSON file)
+          jq -c '.body.activity_items[]? | select((.total_open // 0) > 0)' api_response.json | while read -r i; do
             NAME=$(echo "$i" | jq -r '.name')
             DOW=$(echo "$i" | jq -r '.days_of_week')
             DATES=$(echo "$i" | jq -r '.date_range')
