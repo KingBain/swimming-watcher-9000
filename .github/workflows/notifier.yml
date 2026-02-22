@@ -125,7 +125,7 @@ jobs:
 
           AVAILABILITY_BLOCK=$(cat <<EOF_BLOCK
           <!-- availability:start -->
-          _Last updated: $UPDATED_AT_
+          _Last updated: ${UPDATED_AT}_
 
           - HTTP Status: $HTTP_STATUS
           - Total classes: ${{ steps.parse_response.outputs.total_classes }}
