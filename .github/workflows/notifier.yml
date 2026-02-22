@@ -10,6 +10,14 @@ on:
         required: true
         type: boolean
         default: false
+      dry_run_result:
+        description: 'Dry Run result simulation (used only when Dry Run is true).'
+        required: true
+        type: choice
+        default: no_openings_found
+        options:
+          - no_openings_found
+          - openings_found
 
 permissions:
   contents: write
@@ -111,13 +119,38 @@ jobs:
           echo "full_classes=$FULL_CLASSES" >> "$GITHUB_OUTPUT"
           echo "open_classes=$OPEN_CLASSES" >> "$GITHUB_OUTPUT"
 
+      - name: Determine effective stats for dry run and README
+        id: effective_stats
+        run: |
+          TOTAL_CLASSES="${{ steps.parse_response.outputs.total_classes }}"
+          FULL_CLASSES="${{ steps.parse_response.outputs.full_classes }}"
+          OPEN_CLASSES="${{ steps.parse_response.outputs.open_classes }}"
+
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            if [ "${{ inputs.dry_run_result }}" = "openings_found" ]; then
+              if [ "$TOTAL_CLASSES" -eq 0 ]; then
+                TOTAL_CLASSES=1
+              fi
+
+              OPEN_CLASSES=1
+              FULL_CLASSES=$((TOTAL_CLASSES - OPEN_CLASSES))
+            else
+              OPEN_CLASSES=0
+              FULL_CLASSES=$TOTAL_CLASSES
+            fi
+          fi
+
+          echo "total_classes=$TOTAL_CLASSES" >> "$GITHUB_OUTPUT"
+          echo "full_classes=$FULL_CLASSES" >> "$GITHUB_OUTPUT"
+          echo "open_classes=$OPEN_CLASSES" >> "$GITHUB_OUTPUT"
+
       - name: Update README with latest status
         run: |
           UPDATED_AT=$(date -u +"%Y-%m-%d %H:%M UTC")
 
-          if [ "${{ steps.parse_response.outputs.open_classes }}" -gt 0 ]; then
+          if [ "${{ steps.effective_stats.outputs.open_classes }}" -gt 0 ]; then
             AVAILABILITY_STATUS="🟢 Open spots available"
-          elif [ "${{ steps.parse_response.outputs.total_classes }}" -gt 0 ]; then
+          elif [ "${{ steps.effective_stats.outputs.total_classes }}" -gt 0 ]; then
             AVAILABILITY_STATUS="🟡 No open spots (all classes full)"
           else
             AVAILABILITY_STATUS="🔴 No matching classes found"
@@ -128,9 +161,9 @@ jobs:
           _Last updated: ${UPDATED_AT}_
 
           - HTTP Status: $HTTP_STATUS
-          - Total classes: ${{ steps.parse_response.outputs.total_classes }}
-          - Full classes: ${{ steps.parse_response.outputs.full_classes }}
-          - Classes with openings: ${{ steps.parse_response.outputs.open_classes }}
+          - Total classes: ${{ steps.effective_stats.outputs.total_classes }}
+          - Full classes: ${{ steps.effective_stats.outputs.full_classes }}
+          - Classes with openings: ${{ steps.effective_stats.outputs.open_classes }}
           - Status: $AVAILABILITY_STATUS
           <!-- availability:end -->
           EOF_BLOCK
@@ -167,9 +200,9 @@ jobs:
         run: |
           # Message formatted for WhatsApp readability
           MESSAGE=$(printf "📊 *API Health Check*\n*Total Classes:* %s\n*Full:* %s\n*Openings:* %s" \
-            "${{ steps.parse_response.outputs.total_classes }}" \
-            "${{ steps.parse_response.outputs.full_classes }}" \
-            "${{ steps.parse_response.outputs.open_classes }}")
+            "${{ steps.effective_stats.outputs.total_classes }}" \
+            "${{ steps.effective_stats.outputs.full_classes }}" \
+            "${{ steps.effective_stats.outputs.open_classes }}")
 
           echo -e "Sending Dry Run message:\n$MESSAGE\n---"
 
