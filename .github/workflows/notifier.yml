@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       dry_run:
-        description: 'Dry Run: Query the live API and send a WhatsApp message with the statistics, regardless of openings.'
+        description: 'Dry Run: Query the live API and send a WhatsApp message with the statistics.'
         required: true
         type: boolean
         default: false
@@ -97,7 +97,10 @@ jobs:
           if [ "$OPEN_CLASSES" -eq 0 ] && [ "$TOTAL_CLASSES" -gt 0 ]; then
             echo "All classes are currently full."
           elif [ "$TOTAL_CLASSES" -eq 0 ]; then
-            echo "No classes matched the search criteria."
+            echo "⚠️ No classes matched the search criteria."
+            echo "--- RAW API RESPONSE FOR DEBUGGING ---"
+            jq . api_response.json || cat api_response.json
+            echo "--------------------------------------"
           fi
           
           # Output variables for next steps
