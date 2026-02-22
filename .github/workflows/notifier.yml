@@ -3,7 +3,7 @@ name: Ping and Parse API
 on:
   schedule:
     - cron: '0 * * * *' # Runs every hour
-  workflow_dispatch: # Allows manual triggering (Dry run removed entirely)
+  workflow_dispatch:
 
 jobs:
   ping_and_notify:
@@ -17,10 +17,10 @@ jobs:
         run: |
           API_URL="https://anc.ca.apm.activecommunities.com/ottawa/rest/activities/list?locale=en-US"
           
-          # Dynamically get today's date to keep the search relevant
+          # Dynamically get today's date
           TODAY=$(date +"%Y-%m-%d")
           
-          # Use your exact new payload, but inject TODAY's date dynamically
+          # Use a heredoc to safely store the complex JSON payload
           POST_DATA=$(cat <<EOF
           {
             "activity_search_pattern": {
@@ -55,28 +55,47 @@ jobs:
           EOF
           )
           
-          # Send request
-          API_RESPONSE=$(curl -s -X POST -H "Content-Type: application/json" -d "$POST_DATA" "$API_URL")
+          # Send request: Output body to file and capture only the HTTP status code
+          HTTP_STATUS=$(curl -s -o api_response.json -w "%{http_code}" -X POST -H "Content-Type: application/json" -d "$POST_DATA" "$API_URL")
           
-          # Safely write multiline JSON to environment variable
+          # Save the HTTP Status to environment variables
+          echo "HTTP_STATUS=$HTTP_STATUS" >> "$GITHUB_ENV"
+
+          # Safely write the JSON file contents to environment variable
           {
             echo 'RESPONSE<<EOF'
-            echo "$API_RESPONSE"
+            cat api_response.json
             echo 'EOF'
           } >> "$GITHUB_ENV"
 
-      - name: Parse response and check for available spots
+      - name: Parse response and output stats
         id: parse_response
         run: |
-          # Calculate how many classes actually have spots available (total_open > 0)
-          AVAILABLE_SPOTS=$(echo "$RESPONSE" | jq '[.body.activity_items[]? | select(.total_open > 0)] | length')
-          
-          # Catch empty responses
-          if [ -z "$AVAILABLE_SPOTS" ] || [ "$AVAILABLE_SPOTS" == "null" ]; then
-            AVAILABLE_SPOTS=0
+          # 1. Check if the API call was successful
+          if [ "$HTTP_STATUS" -ne 200 ]; then
+            echo "❌ Error: API returned HTTP $HTTP_STATUS"
+            echo "Response Body: $RESPONSE"
+            exit 1
           fi
+
+          # 2. Calculate statistics safely using jq
+          # Count total items returned in the array
+          TOTAL_ENTRIES=$(echo "$RESPONSE" | jq '[.body.activity_items[]?] | length')
           
-          echo "Classes with available spots found: $AVAILABLE_SPOTS"
+          # Count how many of those items have total_open > 0
+          AVAILABLE_SPOTS=$(echo "$RESPONSE" | jq '[.body.activity_items[]? | select((.total_open // 0) > 0)] | length')
+          
+          # Fallbacks just in case jq returns empty strings
+          TOTAL_ENTRIES=${TOTAL_ENTRIES:-0}
+          AVAILABLE_SPOTS=${AVAILABLE_SPOTS:-0}
+
+          # 3. Print the statistics table to the GitHub Actions Console
+          echo "📊 API Response Statistics:"
+          echo "-----------------------------------"
+          echo "HTTP Response Code    : $HTTP_STATUS"
+          echo "Total Entries Returned: $TOTAL_ENTRIES"
+          echo "Entries with Openings : $AVAILABLE_SPOTS"
+          echo "-----------------------------------"
           
           if [ "$AVAILABLE_SPOTS" -eq 0 ]; then
             echo "No open spots available. Ending action without sending a notification."
@@ -89,7 +108,7 @@ jobs:
         if: steps.parse_response.outputs.available_spots > 0
         run: |
           # Loop strictly through items where total_open > 0
-          echo "$RESPONSE" | jq -c '.body.activity_items[]? | select(.total_open > 0)' | while read -r i; do
+          echo "$RESPONSE" | jq -c '.body.activity_items[]? | select((.total_open // 0) > 0)' | while read -r i; do
             NAME=$(echo "$i" | jq -r '.name')
             DOW=$(echo "$i" | jq -r '.days_of_week')
             DATES=$(echo "$i" | jq -r '.date_range')
