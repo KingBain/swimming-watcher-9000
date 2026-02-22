@@ -2,59 +2,111 @@ name: Ping and Parse API
 
 on:
   schedule:
-    - cron: '0 * * * *' # Runs every hour at the start of the hour
-  workflow_dispatch:
-    inputs:
-      dry_run:
-        description: 'Enable dry run to simulate the API call without sending a real request.'
-        required: true
-        default: 'false'
+    - cron: '0 * * * *' # Runs every hour
+  workflow_dispatch: # Allows manual triggering (Dry run removed entirely)
 
 jobs:
   ping_and_notify:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Send POST request
         id: send_request
         run: |
           API_URL="https://anc.ca.apm.activecommunities.com/ottawa/rest/activities/list?locale=en-US"
-          POST_DATA='{"activity_search_pattern": {"days_of_week": "0000000", "activity_select_param": 2, "center_ids": ["327"], "open_spots": 1, "for_map": false, "season_ids": ["46"], "activity_other_category_ids": ["8"], "activity_keyword": "red"}}'
           
-          if [[ "${{ github.event.inputs.dry_run }}" == "true" ]]; then
-            echo "Dry run enabled, simulating API response..."
-            RESPONSE='{"headers": {"page_info": {"total_records": 2}}, "body": {"activity_items": [{"name": "Yoga Class", "time_range": "9:00 AM - 10:00 AM", "detail_url": "http://example.com/yoga"}]}}'
-          else
-            # Send the POST request and capture the response
-            RESPONSE=$(curl -s -X POST -H "Content-Type: application/json" -d "$POST_DATA" "$API_URL")
-          fi
-          echo "response=$RESPONSE" >> $GITHUB_ENV
+          # Dynamically get today's date to keep the search relevant
+          TODAY=$(date +"%Y-%m-%d")
+          
+          # Use your exact new payload, but inject TODAY's date dynamically
+          POST_DATA=$(cat <<EOF
+          {
+            "activity_search_pattern": {
+              "skills": [],
+              "time_after_str": "",
+              "days_of_week": "",
+              "activity_select_param": 0,
+              "center_ids": ["327"],
+              "time_before_str": "",
+              "open_spots": null,
+              "activity_id": null,
+              "activity_category_ids": [],
+              "date_before": "",
+              "min_age": null,
+              "date_after": "$TODAY",
+              "activity_type_ids": [],
+              "site_ids": [],
+              "for_map": false,
+              "geographic_area_ids": [],
+              "season_ids": [],
+              "activity_department_ids": [],
+              "activity_other_category_ids": [],
+              "child_season_ids": [],
+              "activity_keyword": "Swim Colours 5 – Purple (low ratio)",
+              "instructor_ids": [],
+              "max_age": null,
+              "custom_price_from": "",
+              "custom_price_to": ""
+            },
+            "activity_transfer_pattern": {}
+          }
+          EOF
+          )
+          
+          # Send request
+          API_RESPONSE=$(curl -s -X POST -H "Content-Type: application/json" -d "$POST_DATA" "$API_URL")
+          
+          # Safely write multiline JSON to environment variable
+          {
+            echo 'RESPONSE<<EOF'
+            echo "$API_RESPONSE"
+            echo 'EOF'
+          } >> "$GITHUB_ENV"
 
-      - name: Parse response and check total_records
+      - name: Parse response and check for available spots
         id: parse_response
         run: |
-          TOTAL_RECORDS=$(echo "$RESPONSE" | jq -r '.headers.page_info.total_records')
-          echo "Total records found: $TOTAL_RECORDS"
-          if [ -z "$TOTAL_RECORDS" ] || [ "$TOTAL_RECORDS" -eq 0 ]; then
-            echo "No records found. Ending action."
-            exit 0
+          # Calculate how many classes actually have spots available (total_open > 0)
+          AVAILABLE_SPOTS=$(echo "$RESPONSE" | jq '[.body.activity_items[]? | select(.total_open > 0)] | length')
+          
+          # Catch empty responses
+          if [ -z "$AVAILABLE_SPOTS" ] || [ "$AVAILABLE_SPOTS" == "null" ]; then
+            AVAILABLE_SPOTS=0
           fi
-          echo "total_records=$TOTAL_RECORDS" >> $GITHUB_ENV
+          
+          echo "Classes with available spots found: $AVAILABLE_SPOTS"
+          
+          if [ "$AVAILABLE_SPOTS" -eq 0 ]; then
+            echo "No open spots available. Ending action without sending a notification."
+          fi
+          
+          # Output to next step
+          echo "available_spots=$AVAILABLE_SPOTS" >> "$GITHUB_OUTPUT"
 
-      - name: Parse and send messages for each activity
-        if: steps.parse_response.outputs.total_records > 0
+      - name: Parse and send messages for available activities
+        if: steps.parse_response.outputs.available_spots > 0
         run: |
-          echo "$RESPONSE" | jq -c '.body.activity_items[]' | while read -r i; do
+          # Loop strictly through items where total_open > 0
+          echo "$RESPONSE" | jq -c '.body.activity_items[]? | select(.total_open > 0)' | while read -r i; do
             NAME=$(echo "$i" | jq -r '.name')
+            DOW=$(echo "$i" | jq -r '.days_of_week')
+            DATES=$(echo "$i" | jq -r '.date_range')
             TIME=$(echo "$i" | jq -r '.time_range')
+            OPEN_SPOTS=$(echo "$i" | jq -r '.total_open')
             DETAIL_URL=$(echo "$i" | jq -r '.detail_url')
-            MESSAGE="*Activity Name:* $NAME\n*Time:* $TIME\n*Detail URL:* $DETAIL_URL"
+            
+            # Message formatted for WhatsApp readability
+            MESSAGE=$(printf "*Class:* %s\n*Days:* %s\n*Dates:* %s\n*Time:* %s\n*Spots Available:* %s\n*Link:* %s" \
+              "$NAME" "$DOW" "$DATES" "$TIME" "$OPEN_SPOTS" "$DETAIL_URL")
 
             # Echo the message to the console for debugging
-            echo "Sending message: $MESSAGE"
+            echo -e "Sending message:\n$MESSAGE\n---"
 
-            # Send the message using the messaging API with URL encoding
-            curl -s -X GET "https://api.callmebot.com/whatsapp.php?phone=${{ secrets.WHATSAPP_PHONE_NUMBER_NOTIFY }}&text=$(echo $MESSAGE | jq -sRr @uri)&apikey=${{ secrets.CALLMEBOT_APIKEY }}"
+            # URL encode the payload
+            ENCODED_MESSAGE=$(echo "$MESSAGE" | jq -sRr @uri)
+
+            # Fire the CallMeBot API Call
+            curl -s -X GET "https://api.callmebot.com/whatsapp.php?phone=${{ secrets.WHATSAPP_PHONE_NUMBER_NOTIFY }}&text=${ENCODED_MESSAGE}&apikey=${{ secrets.CALLMEBOT_APIKEY }}"
           done
