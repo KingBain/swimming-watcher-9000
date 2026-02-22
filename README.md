@@ -14,3 +14,6 @@ Last updated: Never
 - Classes with openings: Unknown
 - Status: Unknown
 <!-- availability:end -->
+
+## Development workflow
+- Always sync from the latest `main` before making changes (`git checkout main && git pull`).
