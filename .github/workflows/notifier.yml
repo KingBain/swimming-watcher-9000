@@ -79,6 +79,14 @@ jobs:
           # Save ONLY the HTTP Status to environment variables
           echo "HTTP_STATUS=$HTTP_STATUS" >> "$GITHUB_ENV"
 
+      - name: Upload API response artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: api-response-${{ github.run_id }}
+          path: api_response.json
+          if-no-files-found: warn
+
       - name: Parse response and output stats
         id: parse_response
         run: |
