@@ -6,11 +6,11 @@ Tracks hourly availability for **Swim Colours 5 – Purple (low ratio)** and sen
 
 ## Current Availability Snapshot
 <!-- availability:start -->
-_Last updated: 2026-07-05 18:56 UTC_
+_Last updated: 2026-07-05 20:08 UTC_
 
 - HTTP Status: 200
-- Total classes: 1
-- Full classes: 1
+- Total classes: 0
+- Full classes: 0
 - Classes with openings: 0
-- Status: 🟡 No open spots (all classes full)
+- Status: 🔴 No matching classes found
 <!-- availability:end -->
